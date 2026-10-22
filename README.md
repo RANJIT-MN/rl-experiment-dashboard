@@ -127,22 +127,20 @@ Experiment comparison continues to report training episode summaries separately.
 
 The Phase 6 schema is additive: it creates `training_runs`, `policy_evaluations`, and `evaluation_episodes`, adds nullable `base_seed`, `run_count`, and metric `run_id` columns, and adds an index for run metric history. Existing experiment and metric rows are preserved. Automated tests use isolated temporary SQLite databases.
 
-## Reliability and Restart Recovery
 
-Training and policy evaluation share one process-wide compute semaphore, so only one PPO or MuJoCo job can use the compute slot at a time. The process-local training queue and evaluation queue are each bounded to 10 accepted jobs. Experiment starts require a state transition from `created`, `failed`, or `stopped` to `pending`; workers conditionally transition pending runs to running and only running work can become completed. Repeated stop requests are rejected with `409` after the first request moves an experiment to `stopping`. Queued runs observe cancellation before acquiring the compute slot, and stop without starting. Exceptions preserve already-committed episode metrics and mark the affected run and experiment failed; detailed exceptions are logged server-side while persisted user-facing messages omit exception details.
+## Reliability and Fault Recovery
 
-At startup, after additive schema initialization, persisted training runs left `pending` or `running` are marked failed with an explicit "interrupted by backend restart; outcome unknown" message. Active experiments are reconciled from their child run states; a parent marked completed despite an active child is corrected to failed. Pending/running evaluations are also marked failed. Completed runs and their metrics are not reset or rewritten. No work is automatically resumed because PPO checkpoint resumption is not implemented.
+- Training and policy evaluation share a controlled compute slot.
+- Bounded job queues prevent excessive workload accumulation.
+- Interrupted jobs are marked as failed when the backend restarts; completed results are preserved.
+- Live monitoring supports reconnection and recovery from persisted metric history.
+- Detailed errors are logged on the backend while user-facing messages avoid exposing internal exception details.
 
-The experiment metrics WebSocket sends current persisted status and the latest metric at connection time. Clients reload bounded metric history on connect, reconnect, and server-requested resynchronization, deduplicating by metric ID. Automatic reconnect attempts use exponential backoff capped at 30 seconds and stop after eight consecutive failures; the UI offers a manual retry while the experiment is active. A closed stream does not hide historical charts. Live streaming is best-effort; persisted metric history remains the recovery source.
+**Note:** Training does not automatically resume after a backend restart.
 
-## Restrictions
+## Project Constraints
 
-The final simulation must use MuJoCo.
+- **Required simulation:** MuJoCo (`InvertedPendulum-v5`).
+- **RL algorithm:** Proximal Policy Optimization (PPO).
+- **Excluded:** Gazebo, ROS, ROS 2, `mujoco-py`, and CartPole as the final environment.
 
-The project does not use:
-
-- Gazebo
-- ROS
-- ROS2
-- mujoco-py
-- CartPole as the final RL environment
